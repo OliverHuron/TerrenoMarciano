@@ -25,61 +25,54 @@ public partial class CameraFollow : MonoBehaviour
 
     void Start()
     {
-        
-
         Cursor.lockState = CursorLockMode.Locked;
-        // Sincronizamos la rotación inicial con el robot
         if (target != null) rotY = target.eulerAngles.y;
-
         maxDistance = offset.magnitude;
+        currentDistance = maxDistance;
     }
 
     void LateUpdate()
     {
-        if (Keyboard.current.cKey.wasPressedThisFrame) // Presiona la tecla 'C'
-        {
-            isFirstPerson = !isFirstPerson;
-        }
-
+        if (Keyboard.current.cKey.wasPressedThisFrame) isFirstPerson = !isFirstPerson;
         if (!target) return;
 
         Vector2 mouseDelta = Mouse.current.delta.ReadValue();
-
-        // 1. ROTACIÓN
-        // Horizontal (Y): Afecta directamente al ROBOT
         rotY += mouseDelta.x * sensitivity * Time.deltaTime;
-        // Vertical (X): Solo afecta a la CÁMARA (mirar arriba/abajo)
         rotX -= mouseDelta.y * sensitivity * Time.deltaTime;
+
+        // Limitamos para que no de la vuelta completa
         rotX = Mathf.Clamp(rotX, -80f, 80f);
 
         if (isFirstPerson)
         {
-            // --- MODO PRIMERA PERSONA FIJA ---
-
-            // A. Giramos el cuerpo del robot físicamente a los lados
             target.rotation = Quaternion.Euler(0, rotY, 0);
-
-            // B. Posicionamos la cámara en los ojos (es fija respecto al robot)
             transform.position = target.TransformPoint(fpOffset);
-
-            // C. La cámara hereda el giro del robot + su propio cabeceo arriba/abajo
             transform.rotation = Quaternion.Euler(rotX, rotY, 0);
         }
         else
         {
-            // --- MODO TERCERA PERSONA (Orbital) ---
+            // --- MODO TERCERA PERSONA MEJORADO ---
+
+            // 1. AJUSTE DINÁMICO DE DISTANCIA SEGÚN ÁNGULO
+            // Si rotX es negativo (mirando hacia arriba), reducimos la distancia máxima
+            // para obligar a la cámara a acercarse al robot y no hundirse en el suelo.
+            float angleFactor = Mathf.InverseLerp(0, -80, rotX);
+            float dynamicMaxDistance = Mathf.Lerp(maxDistance, minDistance, angleFactor * 0.8f);
+
             Quaternion rotation = Quaternion.Euler(rotX, rotY, 0);
             Vector3 dir = rotation * Vector3.back;
             Vector3 rayOrigin = target.position + Vector3.up * 1.0f;
 
+            // 2. COLISIÓN FÍSICA (Raycast)
             RaycastHit hit;
-            if (Physics.Raycast(rayOrigin, dir, out hit, maxDistance, collisionLayers))
+            if (Physics.Raycast(rayOrigin, dir, out hit, dynamicMaxDistance, collisionLayers))
             {
-                currentDistance = Mathf.Clamp(hit.distance - 0.2f, minDistance, maxDistance);
+                currentDistance = Mathf.Clamp(hit.distance - 0.3f, minDistance, dynamicMaxDistance);
             }
             else
             {
-                currentDistance = Mathf.Lerp(currentDistance, maxDistance, Time.deltaTime * smoothSpeed);
+                // Si no hay colisión, usamos la distancia dinámica basada en el ángulo
+                currentDistance = Mathf.Lerp(currentDistance, dynamicMaxDistance, Time.deltaTime * smoothSpeed);
             }
 
             Vector3 targetPos = rayOrigin + (dir * currentDistance);
